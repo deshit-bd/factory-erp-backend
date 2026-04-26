@@ -39,6 +39,10 @@ function getLocalDateString() {
   return `${year}-${month}-${day}`;
 }
 
+function shouldSyncProject(status) {
+  return status === "confirmed" || status === "in progress" || status === "completed";
+}
+
 async function syncProjectForSalesOrder(connection, salesOrder) {
   const projectStatus = salesOrder.status === "completed" ? "completed" : "in progress";
   const startDate = getLocalDateString();
@@ -55,17 +59,25 @@ async function syncProjectForSalesOrder(connection, salesOrder) {
   if (existingProjects[0]) {
     await connection.query(
       `UPDATE projects
-       SET status = ?, delivery_date = ?, updated_at = CURRENT_TIMESTAMP()
+       SET product = ?, quantity = ?, status = ?, delivery_date = ?, updated_at = CURRENT_TIMESTAMP()
        WHERE id = ?`,
-      [projectStatus, salesOrder.delivery_date, existingProjects[0].id],
+      [salesOrder.product, Number(salesOrder.quantity || 0), projectStatus, salesOrder.delivery_date, existingProjects[0].id],
     );
     return;
   }
 
   await connection.query(
-    `INSERT INTO projects (name, buyer, start_date, delivery_date, status)
-     VALUES (?, ?, ?, ?, ?)`,
-    [salesOrder.product, salesOrder.buyer, startDate, salesOrder.delivery_date, projectStatus],
+    `INSERT INTO projects (name, buyer, product, quantity, start_date, delivery_date, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      salesOrder.product,
+      salesOrder.buyer,
+      salesOrder.product,
+      Number(salesOrder.quantity || 0),
+      startDate,
+      salesOrder.delivery_date,
+      projectStatus,
+    ],
   );
 }
 
@@ -131,20 +143,47 @@ async function getSalesOrderById(id) {
 }
 
 async function createSalesOrder(orderData) {
-  const [result] = await pool.query(
-    `INSERT INTO sales_order (buyer, product, quantity, unit_price, delivery_date, status)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [
-      orderData.buyer,
-      orderData.product,
-      Number(orderData.quantity),
-      Number(orderData.unitPrice),
-      orderData.deliveryDate,
-      normalizeSalesOrderStatus(orderData.status),
-    ],
-  );
+  const normalizedStatus = normalizeSalesOrderStatus(orderData.status);
+  const connection = await pool.getConnection();
 
-  return getSalesOrderById(result.insertId);
+  try {
+    await connection.beginTransaction();
+
+    const [result] = await connection.query(
+      `INSERT INTO sales_order (buyer, product, quantity, unit_price, delivery_date, status)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        orderData.buyer,
+        orderData.product,
+        Number(orderData.quantity),
+        Number(orderData.unitPrice),
+        orderData.deliveryDate,
+        normalizedStatus,
+      ],
+    );
+
+    const [rows] = await connection.query(
+      `SELECT id, buyer, product, quantity, unit_price, delivery_date, status, created_at, updated_at
+       FROM sales_order
+       WHERE id = ?
+       LIMIT 1`,
+      [result.insertId],
+    );
+
+    const salesOrder = rows[0];
+
+    if (shouldSyncProject(normalizedStatus)) {
+      await syncProjectForSalesOrder(connection, salesOrder);
+    }
+
+    await connection.commit();
+    return mapSalesOrderRow(salesOrder);
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 async function deleteSalesOrder(id) {
@@ -181,7 +220,7 @@ async function updateSalesOrderStatus(id, status) {
 
     const salesOrder = rows[0];
 
-    if (normalizedStatus === "in progress" || normalizedStatus === "completed") {
+    if (shouldSyncProject(normalizedStatus)) {
       await syncProjectForSalesOrder(connection, salesOrder);
     }
 

@@ -29,6 +29,60 @@ function normalizeQualityStatus(status) {
   return String(status || "").toLowerCase() === "fail" ? "fail" : "pass";
 }
 
+async function getProjectProductionLimit(projectId, excludedFactoryEntryId = 0) {
+  const [rows] = await pool.query(
+    `SELECT p.id,
+            COALESCE(so.total_order_quantity, 0) AS total_order_quantity,
+            COALESCE(spt.total_supplier_produced, 0) AS total_supplier_produced,
+            COALESCE(fpt.total_factory_produced, 0) AS total_factory_produced
+     FROM projects p
+     LEFT JOIN (
+       SELECT product, buyer, delivery_date, SUM(quantity) AS total_order_quantity
+       FROM sales_order
+       GROUP BY product, buyer, delivery_date
+     ) so ON so.product = p.name AND so.buyer = p.buyer AND so.delivery_date = p.delivery_date
+     LEFT JOIN (
+       SELECT project_id, SUM(quantity) AS total_supplier_produced
+       FROM supplier_products_tracking
+       GROUP BY project_id
+     ) spt ON spt.project_id = p.id
+     LEFT JOIN (
+       SELECT project_id, SUM(quanttity_produced) AS total_factory_produced
+       FROM factory_product_tracking
+       WHERE id <> ?
+       GROUP BY project_id
+     ) fpt ON fpt.project_id = p.id
+     WHERE p.id = ?
+     LIMIT 1`,
+    [Number(excludedFactoryEntryId || 0), Number(projectId)],
+  );
+
+  if (!rows[0]) {
+    throw new Error("Project not found.");
+  }
+
+  const totalOrderQuantity = Number(rows[0].total_order_quantity || 0);
+  const totalProduced = Number(rows[0].total_supplier_produced || 0) + Number(rows[0].total_factory_produced || 0);
+
+  return {
+    remainingQuantity: Math.max(totalOrderQuantity - totalProduced, 0),
+    totalOrderQuantity,
+  };
+}
+
+async function assertQuantityWithinProjectOrder(entryData, excludedFactoryEntryId = 0) {
+  const quantityProduced = Number(entryData.quantityProduced);
+  const { remainingQuantity, totalOrderQuantity } = await getProjectProductionLimit(entryData.projectId, excludedFactoryEntryId);
+
+  if (totalOrderQuantity <= 0) {
+    throw new Error("No ordered quantity found for this project.");
+  }
+
+  if (quantityProduced > remainingQuantity) {
+    throw new Error(`Quantity produced exceeds remaining ordered quantity. Remaining quantity: ${remainingQuantity}.`);
+  }
+}
+
 function mapFactoryProductRow(row) {
   return {
     recordId: row.id,
@@ -91,6 +145,8 @@ async function getFactoryProductEntryById(id) {
 }
 
 async function createFactoryProductEntry(entryData) {
+  await assertQuantityWithinProjectOrder(entryData);
+
   const [result] = await pool.query(
     `INSERT INTO factory_product_tracking (entry_date, project_id, quanttity_produced, quanttity_status, remarks)
      VALUES (?, ?, ?, ?, ?)`,
@@ -107,6 +163,8 @@ async function createFactoryProductEntry(entryData) {
 }
 
 async function updateFactoryProductEntry(id, entryData) {
+  await assertQuantityWithinProjectOrder(entryData, id);
+
   const [result] = await pool.query(
     `UPDATE factory_product_tracking
      SET entry_date = ?, project_id = ?, quanttity_produced = ?, quanttity_status = ?, remarks = ?
