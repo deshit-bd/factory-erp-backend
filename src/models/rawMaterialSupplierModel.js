@@ -13,18 +13,19 @@ function mapRawMaterialSupplierRow(row) {
     email: row.email,
     phone: row.phone,
     rating: Number(row.rating || 0).toFixed(1),
+    previousDue: Number(row.previous_due || 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
-const rawMaterialSupplierSelect = `SELECT rms.id, rms.name, rms.category, rms.email, rms.phone,
+const rawMaterialSupplierSelect = `SELECT rms.id, rms.name, rms.category, rms.email, rms.phone, rms.previous_due,
        COALESCE(AVG(NULLIF(rmp.supplier_rating, 0)), rms.rating) AS rating,
        rms.created_at, rms.updated_at
      FROM raw_material_supplier rms
      LEFT JOIN raw_material_purchase rmp ON rmp.supplier_id = rms.id`;
 
-const rawMaterialSupplierGroupBy = `GROUP BY rms.id, rms.name, rms.category, rms.email, rms.phone, rms.rating, rms.created_at, rms.updated_at`;
+const rawMaterialSupplierGroupBy = `GROUP BY rms.id, rms.name, rms.category, rms.email, rms.phone, rms.previous_due, rms.rating, rms.created_at, rms.updated_at`;
 
 async function getAllRawMaterialSuppliers(search = "") {
   const normalizedSearch = search.trim();

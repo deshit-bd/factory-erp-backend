@@ -100,6 +100,17 @@ async function updateRawMaterialSupplierAverageRating(connection, supplierId) {
   );
 }
 
+async function increaseRawMaterialSupplierDue(connection, purchaseData) {
+  const totalAmount = Number(purchaseData.quantity || 0) * Number(purchaseData.unitCost || 0);
+
+  await connection.query(
+    `UPDATE raw_material_supplier
+     SET previous_due = previous_due + ?
+     WHERE id = ?`,
+    [totalAmount, Number(purchaseData.supplierId)],
+  );
+}
+
 async function getAllRawMaterialPurchases(search = "") {
   const normalizedSearch = search.trim();
 
@@ -166,6 +177,7 @@ async function createRawMaterialPurchase(purchaseData) {
     );
 
     await upsertRawMaterialStockFromPurchase(connection, purchaseData);
+    await increaseRawMaterialSupplierDue(connection, purchaseData);
     await updateRawMaterialSupplierAverageRating(connection, purchaseData.supplierId);
     await connection.commit();
 

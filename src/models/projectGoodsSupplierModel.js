@@ -13,6 +13,7 @@ function mapProjectGoodsSupplierRow(row) {
     email: row.email,
     phone: row.phone,
     rating: Number(row.rating || 0).toFixed(1),
+    previousDue: Number(row.previous_due || 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -23,7 +24,7 @@ async function getAllProjectGoodsSuppliers(search = "") {
 
   if (!normalizedSearch) {
     const [rows] = await pool.query(
-      `SELECT id, name, category, email, phone, rating, created_at, updated_at
+      `SELECT id, name, category, email, phone, rating, previous_due, created_at, updated_at
        FROM project_goods_supplier
        ORDER BY id ASC`,
     );
@@ -33,7 +34,7 @@ async function getAllProjectGoodsSuppliers(search = "") {
 
   const likeSearch = `%${normalizedSearch}%`;
   const [rows] = await pool.query(
-    `SELECT id, name, category, email, phone, rating, created_at, updated_at
+    `SELECT id, name, category, email, phone, rating, previous_due, created_at, updated_at
      FROM project_goods_supplier
      WHERE CAST(id AS CHAR) LIKE ?
        OR name LIKE ?
@@ -49,7 +50,7 @@ async function getAllProjectGoodsSuppliers(search = "") {
 
 async function getProjectGoodsSupplierById(id) {
   const [rows] = await pool.query(
-    `SELECT id, name, category, email, phone, rating, created_at, updated_at
+    `SELECT id, name, category, email, phone, rating, previous_due, created_at, updated_at
      FROM project_goods_supplier
      WHERE id = ?
      LIMIT 1`,
