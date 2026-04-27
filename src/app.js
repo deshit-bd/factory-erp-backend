@@ -14,6 +14,8 @@ const rawMaterialPurchaseRoutes = require("./routes/rawMaterialPurchaseRoutes");
 const rawMaterialStockRoutes = require("./routes/rawMaterialStockRoutes");
 const rawMaterialAllocationRoutes = require("./routes/rawMaterialAllocationRoutes");
 const factoryProductTrackingRoutes = require("./routes/factoryProductTrackingRoutes");
+const deliveryShipmentRoutes = require("./routes/deliveryShipmentRoutes");
+const invoiceRoutes = require("./routes/invoiceRoutes");
 
 const app = express();
 
@@ -40,5 +42,7 @@ app.use("/api/raw-material-purchases", rawMaterialPurchaseRoutes);
 app.use("/api/raw-material-stocks", rawMaterialStockRoutes);
 app.use("/api/raw-material-allocations", rawMaterialAllocationRoutes);
 app.use("/api/factory-product-tracking", factoryProductTrackingRoutes);
+app.use("/api/delivery-shipments", deliveryShipmentRoutes);
+app.use("/api/invoices", invoiceRoutes);
 
 module.exports = app;

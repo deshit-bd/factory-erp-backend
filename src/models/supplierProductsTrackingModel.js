@@ -33,6 +33,111 @@ function formatDateValue(value) {
   return `${year}-${month}-${day}`;
 }
 
+async function getProjectSupplyLimit(projectId, excludedSupplierEntryId = 0) {
+  const [rows] = await pool.query(
+    `SELECT p.id,
+            COALESCE(so.total_order_quantity, 0) AS total_order_quantity,
+            COALESCE(spt.total_supplier_produced, 0) AS total_supplier_produced,
+            COALESCE(fpt.total_factory_produced, 0) AS total_factory_produced
+     FROM projects p
+     LEFT JOIN (
+       SELECT product, buyer, delivery_date, SUM(quantity) AS total_order_quantity
+       FROM sales_order
+       GROUP BY product, buyer, delivery_date
+     ) so ON so.product = p.name AND so.buyer = p.buyer AND so.delivery_date = p.delivery_date
+     LEFT JOIN (
+       SELECT project_id, SUM(quantity) AS total_supplier_produced
+       FROM supplier_products_tracking
+       WHERE id <> ?
+       GROUP BY project_id
+     ) spt ON spt.project_id = p.id
+     LEFT JOIN (
+       SELECT project_id, SUM(quanttity_produced) AS total_factory_produced
+       FROM factory_product_tracking
+       GROUP BY project_id
+     ) fpt ON fpt.project_id = p.id
+     WHERE p.id = ?
+     LIMIT 1`,
+    [Number(excludedSupplierEntryId || 0), Number(projectId)],
+  );
+
+  if (!rows[0]) {
+    throw new Error("Project not found.");
+  }
+
+  const totalOrderQuantity = Number(rows[0].total_order_quantity || 0);
+  const totalProduced = Number(rows[0].total_supplier_produced || 0) + Number(rows[0].total_factory_produced || 0);
+
+  return {
+    remainingQuantity: Math.max(totalOrderQuantity - totalProduced, 0),
+    totalOrderQuantity,
+  };
+}
+
+async function assertQuantityWithinProjectOrder(entryData, excludedSupplierEntryId = 0) {
+  const quantitySupplied = Number(entryData.quantitySupplied);
+  const { remainingQuantity, totalOrderQuantity } = await getProjectSupplyLimit(entryData.projectId, excludedSupplierEntryId);
+
+  if (totalOrderQuantity <= 0) {
+    throw new Error("No ordered quantity found for this project.");
+  }
+
+  if (quantitySupplied > remainingQuantity) {
+    throw new Error(`Quantity supplied exceeds remaining ordered quantity. Remaining quantity: ${remainingQuantity}.`);
+  }
+}
+
+async function getSupplierAssignmentLimit(projectId, supplierId, excludedSupplierEntryId = 0) {
+  const [rows] = await pool.query(
+    `SELECT COALESCE(sa.total_assigned_quantity, 0) AS total_assigned_quantity,
+            COALESCE(spt.total_supplier_produced, 0) AS total_supplier_produced
+     FROM project_goods_supplier pgs
+     LEFT JOIN (
+       SELECT supplier, project_id, SUM(quantity) AS total_assigned_quantity
+       FROM supplier_assignment
+       GROUP BY supplier, project_id
+     ) sa ON sa.supplier = pgs.name AND sa.project_id = ?
+     LEFT JOIN (
+       SELECT supplier_id, project_id, SUM(quantity) AS total_supplier_produced
+       FROM supplier_products_tracking
+       WHERE id <> ?
+       GROUP BY supplier_id, project_id
+     ) spt ON spt.supplier_id = pgs.id AND spt.project_id = ?
+     WHERE pgs.id = ?
+     LIMIT 1`,
+    [Number(projectId), Number(excludedSupplierEntryId || 0), Number(projectId), Number(supplierId)],
+  );
+
+  if (!rows[0]) {
+    throw new Error("Supplier not found.");
+  }
+
+  const totalAssignedQuantity = Number(rows[0].total_assigned_quantity || 0);
+  const totalSupplierProduced = Number(rows[0].total_supplier_produced || 0);
+
+  return {
+    remainingAssignedQuantity: Math.max(totalAssignedQuantity - totalSupplierProduced, 0),
+    totalAssignedQuantity,
+  };
+}
+
+async function assertQuantityWithinSupplierAssignment(entryData, excludedSupplierEntryId = 0) {
+  const quantitySupplied = Number(entryData.quantitySupplied);
+  const { remainingAssignedQuantity, totalAssignedQuantity } = await getSupplierAssignmentLimit(
+    entryData.projectId,
+    entryData.supplierId,
+    excludedSupplierEntryId,
+  );
+
+  if (totalAssignedQuantity <= 0) {
+    throw new Error("No supplier assigned quantity found for this project.");
+  }
+
+  if (quantitySupplied > remainingAssignedQuantity) {
+    throw new Error(`Quantity supplied exceeds supplier assigned remaining quantity. Remaining quantity: ${remainingAssignedQuantity}.`);
+  }
+}
+
 function mapSupplierProductsTrackingRow(row) {
   return {
     recordId: row.id,
@@ -83,6 +188,9 @@ async function getSupplierProductsTrackingById(id) {
 }
 
 async function createSupplierProductsTracking(entryData) {
+  await assertQuantityWithinProjectOrder(entryData);
+  await assertQuantityWithinSupplierAssignment(entryData);
+
   const [result] = await pool.query(
     `INSERT INTO supplier_products_tracking (entry_date, supplier_id, project_id, product, quantity, status, notes, receipt_location)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -102,6 +210,9 @@ async function createSupplierProductsTracking(entryData) {
 }
 
 async function updateSupplierProductsTracking(id, entryData) {
+  await assertQuantityWithinProjectOrder(entryData, id);
+  await assertQuantityWithinSupplierAssignment(entryData, id);
+
   const fields = ["entry_date = ?", "supplier_id = ?", "project_id = ?", "product = ?", "quantity = ?", "status = ?", "notes = ?"];
   const values = [
     entryData.date,

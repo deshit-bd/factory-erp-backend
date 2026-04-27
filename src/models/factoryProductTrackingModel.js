@@ -33,7 +33,7 @@ async function getProjectProductionLimit(projectId, excludedFactoryEntryId = 0) 
   const [rows] = await pool.query(
     `SELECT p.id,
             COALESCE(so.total_order_quantity, 0) AS total_order_quantity,
-            COALESCE(spt.total_supplier_produced, 0) AS total_supplier_produced,
+            COALESCE(sa.total_supplier_assigned, 0) AS total_supplier_assigned,
             COALESCE(fpt.total_factory_produced, 0) AS total_factory_produced
      FROM projects p
      LEFT JOIN (
@@ -42,10 +42,10 @@ async function getProjectProductionLimit(projectId, excludedFactoryEntryId = 0) 
        GROUP BY product, buyer, delivery_date
      ) so ON so.product = p.name AND so.buyer = p.buyer AND so.delivery_date = p.delivery_date
      LEFT JOIN (
-       SELECT project_id, SUM(quantity) AS total_supplier_produced
-       FROM supplier_products_tracking
+       SELECT project_id, SUM(quantity) AS total_supplier_assigned
+       FROM supplier_assignment
        GROUP BY project_id
-     ) spt ON spt.project_id = p.id
+     ) sa ON sa.project_id = p.id
      LEFT JOIN (
        SELECT project_id, SUM(quanttity_produced) AS total_factory_produced
        FROM factory_product_tracking
@@ -62,10 +62,11 @@ async function getProjectProductionLimit(projectId, excludedFactoryEntryId = 0) 
   }
 
   const totalOrderQuantity = Number(rows[0].total_order_quantity || 0);
-  const totalProduced = Number(rows[0].total_supplier_produced || 0) + Number(rows[0].total_factory_produced || 0);
+  const totalReservedForSupplier = Number(rows[0].total_supplier_assigned || 0);
+  const totalFactoryProduced = Number(rows[0].total_factory_produced || 0);
 
   return {
-    remainingQuantity: Math.max(totalOrderQuantity - totalProduced, 0),
+    remainingQuantity: Math.max(totalOrderQuantity - totalReservedForSupplier - totalFactoryProduced, 0),
     totalOrderQuantity,
   };
 }

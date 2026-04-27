@@ -20,6 +20,17 @@ function formatProjectStatus(status) {
   return "In Progress";
 }
 
+function getProjectStatus(row) {
+  const totalOrderQuantity = Number(row.quantity || row.total_order_quantity || 0);
+  const totalProduced = Number(row.total_supplier_produced || 0) + Number(row.total_factory_produced || 0);
+
+  if (totalOrderQuantity > 0) {
+    return totalProduced === totalOrderQuantity ? "Completed" : "In Progress";
+  }
+
+  return formatProjectStatus(row.status || row.order_status);
+}
+
 function getProjectProgress(row) {
   const totalOrderQuantity = Number(row.quantity || row.total_order_quantity || 0);
   const totalProduced = Number(row.total_supplier_produced || 0) + Number(row.total_factory_produced || 0);
@@ -40,7 +51,7 @@ function mapProjectRow(row) {
     buyer: row.buyer,
     startDate: row.start_date,
     deliveryDate: row.delivery_date,
-    status: formatProjectStatus(row.order_status || row.status),
+    status: getProjectStatus(row),
     progress: getProjectProgress(row),
     totalOrderQuantity: String(Number(row.quantity || row.total_order_quantity || 0)),
     totalSupplierProduced: String(Number(row.total_supplier_produced || 0)),
