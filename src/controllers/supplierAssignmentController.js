@@ -15,6 +15,10 @@ function validateSupplierAssignmentPayload(body) {
     errors.push("Supplier is required.");
   }
 
+  if (!body.supplierId || Number(body.supplierId) <= 0) {
+    errors.push("Supplier selection is invalid.");
+  }
+
   if (!body.quantity || Number(body.quantity) <= 0) {
     errors.push("Quantity must be greater than zero.");
   }

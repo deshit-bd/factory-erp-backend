@@ -1,4 +1,5 @@
 const { pool } = require("../config/db");
+const { insertDueLedgerEntry, normalizeLedgerDate } = require("./ledgerModel");
 
 function formatSupplierProductsTrackingCode(id) {
   return `SP-${String(id).padStart(3, "0")}`;
@@ -31,6 +32,27 @@ function formatDateValue(value) {
   const day = String(date.getDate()).padStart(2, "0");
 
   return `${year}-${month}-${day}`;
+}
+
+async function getSupplierAssignedUnitPrice(connection, projectId, supplierId) {
+  const [rows] = await connection.query(
+    `SELECT CASE
+              WHEN SUM(sa.quantity) = 0 THEN 0
+              ELSE SUM(sa.quantity * sa.unit_price) / SUM(sa.quantity)
+            END AS unit_price
+     FROM supplier_assignment sa
+     INNER JOIN project_goods_supplier pgs ON pgs.name = sa.supplier
+     WHERE sa.project_id = ?
+       AND pgs.id = ?
+     LIMIT 1`,
+    [Number(projectId), Number(supplierId)],
+  );
+
+  return Number(rows[0]?.unit_price || 0);
+}
+
+function formatProjectCode(projectId) {
+  return `PRJ-${String(Number(projectId) || 0).padStart(3, "0")}`;
 }
 
 async function getProjectSupplyLimit(projectId, excludedSupplierEntryId = 0) {
@@ -191,22 +213,55 @@ async function createSupplierProductsTracking(entryData) {
   await assertQuantityWithinProjectOrder(entryData);
   await assertQuantityWithinSupplierAssignment(entryData);
 
-  const [result] = await pool.query(
-    `INSERT INTO supplier_products_tracking (entry_date, supplier_id, project_id, product, quantity, status, notes, receipt_location)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      entryData.date,
-      Number(entryData.supplierId),
-      Number(entryData.projectId),
-      Number(entryData.productId),
-      Number(entryData.quantitySupplied),
-      entryData.qualityStatus,
-      entryData.notes,
-      entryData.receiptLocation,
-    ],
-  );
+  const connection = await pool.getConnection();
 
-  return getSupplierProductsTrackingById(result.insertId);
+  try {
+    await connection.beginTransaction();
+
+    const unitPrice = await getSupplierAssignedUnitPrice(connection, entryData.projectId, entryData.supplierId);
+    const quantitySupplied = Number(entryData.quantitySupplied);
+    const suppliedAmount = quantitySupplied * unitPrice;
+
+    const [result] = await connection.query(
+      `INSERT INTO supplier_products_tracking (entry_date, supplier_id, project_id, product, quantity, status, notes, receipt_location)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        entryData.date,
+        Number(entryData.supplierId),
+        Number(entryData.projectId),
+        Number(entryData.productId),
+        quantitySupplied,
+        entryData.qualityStatus,
+        entryData.notes,
+        entryData.receiptLocation,
+      ],
+    );
+
+    if (suppliedAmount > 0) {
+      await insertDueLedgerEntry(connection, {
+        ledgerDate: normalizeLedgerDate(entryData.date),
+        reference: formatSupplierProductsTrackingCode(result.insertId),
+        description: `Project goods supplier due / Supplier #${Number(entryData.supplierId)} / ${formatProjectCode(entryData.projectId)}`,
+        debit: 0,
+        credit: suppliedAmount,
+      });
+
+      await connection.query(
+        `UPDATE project_goods_supplier
+         SET previous_due = COALESCE(previous_due, 0) + ?
+         WHERE id = ?`,
+        [suppliedAmount, Number(entryData.supplierId)],
+      );
+    }
+
+    await connection.commit();
+    return getSupplierProductsTrackingById(result.insertId);
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 async function updateSupplierProductsTracking(id, entryData) {

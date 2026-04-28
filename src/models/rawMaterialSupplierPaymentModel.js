@@ -1,4 +1,5 @@
 const { pool } = require("../config/db");
+const { insertBankLedgerEntry, insertCashLedgerEntry, insertDueLedgerEntry } = require("./ledgerModel");
 
 function formatPaymentCode(id) {
   return `RMSP-${String(id).padStart(3, "0")}`;
@@ -128,6 +129,35 @@ async function createRawMaterialSupplierPayment(paymentData) {
         paymentStatus,
       ],
     );
+
+    const reference = formatPaymentCode(result.insertId);
+    const description = `Raw material supplier payment / Supplier #${Number(paymentData.supplierId)}`;
+
+    if (paymentData.paymentMethod === "bank") {
+      await insertBankLedgerEntry(connection, {
+        ledgerDate: paymentData.paymentDate,
+        reference,
+        description,
+        debit: 0,
+        credit: paidAmount,
+      });
+    } else {
+      await insertCashLedgerEntry(connection, {
+        ledgerDate: paymentData.paymentDate,
+        reference,
+        description,
+        debit: 0,
+        credit: paidAmount,
+      });
+    }
+
+    await insertDueLedgerEntry(connection, {
+      ledgerDate: paymentData.paymentDate,
+      reference,
+      description: `Raw material supplier due / Supplier #${Number(paymentData.supplierId)}`,
+      debit: paidAmount,
+      credit: 0,
+    });
 
     await connection.query(
       `UPDATE raw_material_supplier

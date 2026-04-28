@@ -22,6 +22,8 @@ const factoryCostRoutes = require("./routes/factoryCostRoutes");
 const shipmentCostRoutes = require("./routes/shipmentCostRoutes");
 const monthlyBillRoutes = require("./routes/monthlyBillRoutes");
 const officeBillRoutes = require("./routes/officeBillRoutes");
+const accountsRoutes = require("./routes/accountsRoutes");
+const authRoutes = require("./routes/authRoutes");
 
 const app = express();
 
@@ -56,5 +58,7 @@ app.use("/api/factory-costs", factoryCostRoutes);
 app.use("/api/shipment-costs", shipmentCostRoutes);
 app.use("/api/monthly-bills", monthlyBillRoutes);
 app.use("/api/office-bills", officeBillRoutes);
+app.use("/api/accounts", accountsRoutes);
+app.use("/api/auth", authRoutes);
 
 module.exports = app;

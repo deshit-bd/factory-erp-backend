@@ -1,4 +1,5 @@
 const { pool } = require("../config/db");
+const { insertCashLedgerEntry, normalizeLedgerDate } = require("./ledgerModel");
 
 function formatShipmentCode(id) {
   return `SHP-${String(id).padStart(3, "0")}`;
@@ -83,7 +84,7 @@ async function createShipmentCosts(shipmentData) {
     await connection.beginTransaction();
 
     for (const item of shipmentData.items) {
-      await connection.query(
+      const [result] = await connection.query(
         `INSERT INTO shipment_costs (project_id, destination, shipment_date, category, amount, description)
          VALUES (?, ?, ?, ?, ?, ?)`,
         [
@@ -95,6 +96,14 @@ async function createShipmentCosts(shipmentData) {
           item.description || null,
         ],
       );
+
+      await insertCashLedgerEntry(connection, {
+        ledgerDate: normalizeLedgerDate(shipmentData.shipmentDate),
+        reference: formatShipmentCode(result.insertId),
+        description: `Shipment cost / PRJ-${String(Number(shipmentData.projectId)).padStart(3, "0")} / ${item.category}`,
+        debit: 0,
+        credit: Number(item.amount),
+      });
     }
 
     await connection.commit();

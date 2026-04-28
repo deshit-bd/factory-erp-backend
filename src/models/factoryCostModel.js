@@ -1,5 +1,6 @@
 const path = require("path");
 const { pool } = require("../config/db");
+const { insertCashLedgerEntry, normalizeLedgerDate } = require("./ledgerModel");
 
 function formatFactoryCostCode(id) {
   return `FC-${String(id).padStart(3, "0")}`;
@@ -62,20 +63,40 @@ async function getFactoryCostById(id) {
 }
 
 async function createFactoryCost(factoryCost) {
-  const [result] = await pool.query(
-    `INSERT INTO factory_costs (category, cost_category, description, amount, receipt_location, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [
-      factoryCost.category,
-      factoryCost.costCategory,
-      factoryCost.description,
-      Number(factoryCost.amount),
-      factoryCost.receiptLocation,
-      factoryCost.createdAt,
-    ],
-  );
+  const connection = await pool.getConnection();
 
-  return getFactoryCostById(result.insertId);
+  try {
+    await connection.beginTransaction();
+
+    const [result] = await connection.query(
+      `INSERT INTO factory_costs (category, cost_category, description, amount, receipt_location, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        factoryCost.category,
+        factoryCost.costCategory,
+        factoryCost.description,
+        Number(factoryCost.amount),
+        factoryCost.receiptLocation,
+        factoryCost.createdAt,
+      ],
+    );
+
+    await insertCashLedgerEntry(connection, {
+      ledgerDate: normalizeLedgerDate(factoryCost.createdAt),
+      reference: formatFactoryCostCode(result.insertId),
+      description: `Factory cost / ${factoryCost.costCategory}`,
+      debit: 0,
+      credit: Number(factoryCost.amount),
+    });
+
+    await connection.commit();
+    return getFactoryCostById(result.insertId);
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 module.exports = {

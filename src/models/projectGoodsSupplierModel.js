@@ -19,13 +19,40 @@ function mapProjectGoodsSupplierRow(row) {
   };
 }
 
+async function hasPreviousDueColumn() {
+  try {
+    const [rows] = await pool.query(
+      `SELECT 1
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'project_goods_supplier'
+         AND COLUMN_NAME = 'previous_due'
+       LIMIT 1`,
+    );
+
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function getProjectGoodsSupplierSelect() {
+  const includePreviousDue = await hasPreviousDueColumn();
+
+  return includePreviousDue
+    ? `SELECT id, name, category, email, phone, rating, previous_due, created_at, updated_at
+       FROM project_goods_supplier`
+    : `SELECT id, name, category, email, phone, rating, 0 AS previous_due, created_at, updated_at
+       FROM project_goods_supplier`;
+}
+
 async function getAllProjectGoodsSuppliers(search = "") {
   const normalizedSearch = search.trim();
+  const selectQuery = await getProjectGoodsSupplierSelect();
 
   if (!normalizedSearch) {
     const [rows] = await pool.query(
-      `SELECT id, name, category, email, phone, rating, previous_due, created_at, updated_at
-       FROM project_goods_supplier
+      `${selectQuery}
        ORDER BY id ASC`,
     );
 
@@ -34,8 +61,7 @@ async function getAllProjectGoodsSuppliers(search = "") {
 
   const likeSearch = `%${normalizedSearch}%`;
   const [rows] = await pool.query(
-    `SELECT id, name, category, email, phone, rating, previous_due, created_at, updated_at
-     FROM project_goods_supplier
+    `${selectQuery}
      WHERE CAST(id AS CHAR) LIKE ?
        OR name LIKE ?
        OR category LIKE ?
@@ -49,9 +75,9 @@ async function getAllProjectGoodsSuppliers(search = "") {
 }
 
 async function getProjectGoodsSupplierById(id) {
+  const selectQuery = await getProjectGoodsSupplierSelect();
   const [rows] = await pool.query(
-    `SELECT id, name, category, email, phone, rating, previous_due, created_at, updated_at
-     FROM project_goods_supplier
+    `${selectQuery}
      WHERE id = ?
      LIMIT 1`,
     [id],

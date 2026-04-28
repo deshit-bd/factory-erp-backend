@@ -1,4 +1,5 @@
 const { pool } = require("../config/db");
+const { insertBankLedgerEntry, insertCashLedgerEntry, insertDueLedgerEntry } = require("./ledgerModel");
 
 function formatPaymentCode(id) {
   return `PGSP-${String(id).padStart(3, "0")}`;
@@ -128,6 +129,35 @@ async function createProjectGoodsSupplierPayment(paymentData) {
         paymentStatus,
       ],
     );
+
+    const reference = formatPaymentCode(result.insertId);
+    const description = `Project goods supplier payment / Supplier #${Number(paymentData.supplierId)}`;
+
+    if (paymentData.paymentMethod === "bank") {
+      await insertBankLedgerEntry(connection, {
+        ledgerDate: paymentData.paymentDate,
+        reference,
+        description,
+        debit: 0,
+        credit: paidAmount,
+      });
+    } else {
+      await insertCashLedgerEntry(connection, {
+        ledgerDate: paymentData.paymentDate,
+        reference,
+        description,
+        debit: 0,
+        credit: paidAmount,
+      });
+    }
+
+    await insertDueLedgerEntry(connection, {
+      ledgerDate: paymentData.paymentDate,
+      reference,
+      description: `Project goods supplier due / Supplier #${Number(paymentData.supplierId)}`,
+      debit: paidAmount,
+      credit: 0,
+    });
 
     await connection.query(
       `UPDATE project_goods_supplier

@@ -1,5 +1,6 @@
 const path = require("path");
 const { pool } = require("../config/db");
+const { insertCashLedgerEntry, normalizeLedgerDate } = require("./ledgerModel");
 
 function formatOfficeBillCode(id) {
   return `OFC-${String(id).padStart(3, "0")}`;
@@ -63,20 +64,40 @@ async function getOfficeBillById(id) {
 }
 
 async function createOfficeBill(officeBill) {
-  const [result] = await pool.query(
-    `INSERT INTO office_bills (category, cost_category, description, amount, receipt_location, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [
-      officeBill.category,
-      officeBill.costCategory,
-      officeBill.description,
-      Number(officeBill.amount),
-      officeBill.receiptLocation,
-      officeBill.createdAt,
-    ],
-  );
+  const connection = await pool.getConnection();
 
-  return getOfficeBillById(result.insertId);
+  try {
+    await connection.beginTransaction();
+
+    const [result] = await connection.query(
+      `INSERT INTO office_bills (category, cost_category, description, amount, receipt_location, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        officeBill.category,
+        officeBill.costCategory,
+        officeBill.description,
+        Number(officeBill.amount),
+        officeBill.receiptLocation,
+        officeBill.createdAt,
+      ],
+    );
+
+    await insertCashLedgerEntry(connection, {
+      ledgerDate: normalizeLedgerDate(officeBill.createdAt),
+      reference: formatOfficeBillCode(result.insertId),
+      description: `Office cost / ${officeBill.costCategory}`,
+      debit: 0,
+      credit: Number(officeBill.amount),
+    });
+
+    await connection.commit();
+    return getOfficeBillById(result.insertId);
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 module.exports = {

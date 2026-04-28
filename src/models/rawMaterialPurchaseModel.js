@@ -1,4 +1,5 @@
 const { pool } = require("../config/db");
+const { insertDueLedgerEntry, normalizeLedgerDate } = require("./ledgerModel");
 
 function formatRawMaterialPurchaseCode(id) {
   return `PUR-${String(id).padStart(3, "0")}`;
@@ -122,7 +123,7 @@ async function getAllRawMaterialPurchases(search = "") {
   if (!normalizedSearch) {
     const [rows] = await pool.query(
       `${baseQuery}
-       ORDER BY rmp.id DESC`,
+       ORDER BY rmp.id ASC`,
     );
 
     return rows.map(mapRawMaterialPurchaseRow);
@@ -135,7 +136,7 @@ async function getAllRawMaterialPurchases(search = "") {
        OR rmp.material LIKE ?
        OR rms.name LIKE ?
        OR rmp.created_at LIKE ?
-     ORDER BY rmp.id DESC`,
+     ORDER BY rmp.id ASC`,
     [likeSearch, likeSearch, likeSearch, likeSearch],
   );
 
@@ -175,6 +176,15 @@ async function createRawMaterialPurchase(purchaseData) {
         purchaseData.createdAt,
       ],
     );
+
+    const totalAmount = Number(purchaseData.quantity || 0) * Number(purchaseData.unitCost || 0);
+    await insertDueLedgerEntry(connection, {
+      ledgerDate: normalizeLedgerDate(purchaseData.createdAt),
+      reference: formatRawMaterialPurchaseCode(result.insertId),
+      description: `Raw material supplier due / Supplier #${Number(purchaseData.supplierId)} / ${purchaseData.material}`,
+      debit: 0,
+      credit: totalAmount,
+    });
 
     await upsertRawMaterialStockFromPurchase(connection, purchaseData);
     await increaseRawMaterialSupplierDue(connection, purchaseData);

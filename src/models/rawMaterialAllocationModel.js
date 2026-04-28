@@ -46,7 +46,7 @@ async function getAllRawMaterialAllocations(search = "") {
   if (!normalizedSearch) {
     const [rows] = await pool.query(
       `${allocationSelect}
-       ORDER BY rma.id DESC`,
+       ORDER BY rma.id ASC`,
     );
 
     return rows.map(mapRawMaterialAllocationRow);
@@ -60,7 +60,7 @@ async function getAllRawMaterialAllocations(search = "") {
        OR p.name LIKE ?
        OR rms.material LIKE ?
        OR rma.allocation_date LIKE ?
-     ORDER BY rma.id DESC`,
+     ORDER BY rma.id ASC`,
     [likeSearch, likeSearch, likeSearch, likeSearch, likeSearch],
   );
 

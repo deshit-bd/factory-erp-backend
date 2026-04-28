@@ -25,7 +25,7 @@ function getProjectStatus(row) {
   const totalProduced = Number(row.total_supplier_produced || 0) + Number(row.total_factory_produced || 0);
 
   if (totalOrderQuantity > 0) {
-    return totalProduced === totalOrderQuantity ? "Completed" : "In Progress";
+    return totalProduced >= totalOrderQuantity ? "Completed" : "In Progress";
   }
 
   return formatProjectStatus(row.status || row.order_status);
